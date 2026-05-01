@@ -8,14 +8,12 @@ A Python-based machine learning project that analyzes Amazon product reviews and
 - Removes stopwords and non-alphabetic characters for cleaner input
 - Trained on Amazon product reviews dataset with bigram support
 - Desktop GUI built with Tkinter
-- Web UI alternative built with Streamlit
 
 ## Project Structure
 
 ```
 ├── ReviewSentimentAnalyzer.py   # Training script — builds and saves the model
 ├── Predict_Review.py            # Desktop GUI app (Tkinter)
-├── Predict_Review_Streamlit.py  # Web UI app (Streamlit)
 ├── sentiment_model.pkl          # Pre-trained model (ready to use)
 ├── requirements.txt
 └── README.md
@@ -31,14 +29,9 @@ pip install -r requirements.txt
 
 ## Usage
 
-### Option 1 — Desktop GUI (Tkinter)
+### Run the app
 ```bash
 py Predict_Review.py
-```
-
-### Option 2 — Web UI (Streamlit)
-```bash
-streamlit run Predict_Review_Streamlit.py
 ```
 
 ### Retrain the model (optional)
