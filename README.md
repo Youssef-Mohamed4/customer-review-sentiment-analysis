@@ -1,6 +1,6 @@
 # Customer Review Sentiment Analyzer
 
-A Python-based machine learning project that analyzes Amazon product reviews and classifies them as **Positive**, **Neutral**, or **Negative** using Logistic Regression with TF-IDF vectorization.
+A Python-based machine learning project that analyzes product reviews and classifies them as **Positive**, **Neutral**, or **Negative** using Logistic Regression with TF-IDF vectorization.
 
 ## Features
 - Classifies reviews into 3 sentiment classes: Positive, Neutral, Negative
