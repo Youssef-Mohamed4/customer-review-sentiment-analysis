@@ -14,7 +14,7 @@ A Python-based machine learning project that analyzes product or service reviews
 
 ```
 ├── ReviewSentimentAnalyzer.py   # Training script — builds and saves the model
-├── app.py                       # Streamlit web app
+├── Predict_Review.py            # Streamlit web app
 ├── sentiment_model.joblib       # Pre-trained model (ready to use)
 ├── sentiment_dataset.csv        # Balanced 31K training dataset
 ├── requirements.txt
