@@ -1,177 +1,82 @@
-import pickle
-import warnings
-warnings.filterwarnings('ignore')
+import streamlit as st
+import joblib
+import re
+import numpy as np
 from nltk.corpus import stopwords
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
 import nltk
-import tkinter as tk
-from tkinter import font as tkfont
+from scipy.sparse import hstack, csr_matrix
+nltk.download('stopwords', quiet=True)
+nltk.download('vader_lexicon', quiet=True)
 
-# Download NLTK data if not already present
+# @st.cache_resource keeps the model in RAM so the web page doesn't reload it on every button click
+@st.cache_resource
+def load_model_data():
+    return joblib.load('sentiment_model.joblib')
+
+# Safely attempt to load the packaged model
 try:
-    nltk.data.find('corpora/stopwords')
-except LookupError:
-    nltk.download('stopwords')
+    model_data = load_model_data()
+    model = model_data['model']
+    vectorizer = model_data['vectorizer']
+    classes = model_data['classes']
+except FileNotFoundError:
+    st.error("Model file not found. Please run main.py first.")
+    st.stop()
 
-# Text cleaning function (must match training preprocessing)
-def clean_review(review, stp_words):
-    clean_review = " ".join(word.lower() for word in review.split()
-                            if word.lower() not in stp_words and word.isalpha())
-    return clean_review
+# --- NLP SETUP ---
+# Must exactly match the logic used during the model's training phase
+stp_words = set(stopwords.words('english'))
+sia = SentimentIntensityAnalyzer()
 
-# Load the saved model
-def load_model():
-    with open('sentiment_model.pkl', 'rb') as f:
-        data = pickle.load(f)
-    return data['model'], data['vectorizer'], data['classes']
+def clean_review(review):
+    review = str(review).lower()
+    review = re.sub(r'http\S+|www\S+|https\S+', '', review, flags=re.MULTILINE)
+    review = re.sub(r'\@\w+|\#', '', review)
+    review = re.sub(r'[^\w\s]', '', review)
+    return " ".join(word for word in review.split() if word not in stp_words)
 
+def get_vader_features(text):
+    scores = sia.polarity_scores(str(text))
+    return [scores['neg'], scores['neu'], scores['pos'], scores['compound']]
 
-# ── GUI ──────────────────────────────────────────────────────────────────────
+# --- STREAMLIT UI LAYOUT ---
+st.set_page_config(page_title="Sentiment Analyzer", page_icon="🧠")
 
-COLORS = {
-    'bg':       '#0f0f0f',
-    'surface':  '#1a1a1a',
-    'border':   '#2a2a2a',
-    'accent':   '#e8c547',
-    'text':     '#f0f0f0',
-    'muted':    '#666666',
-    'negative': '#e05252',
-    'neutral':  '#e8c547',
-    'positive': '#52c07a',
-}
+st.title("🧠 Review Sentiment Analyzer")
+st.markdown("Enter a product or service review below to analyze its sentiment.")
 
-SENTIMENT_COLORS = {
-    'Negative': COLORS['negative'],
-    'Neutral':  COLORS['neutral'],
-    'Positive': COLORS['positive'],
-}
+# User Input Widget
+user_input = st.text_area("Review Text", height=150, placeholder="Type your review here...")
 
-SENTIMENT_ICONS = {
-    'Negative': '✕',
-    'Neutral':  '◎',
-    'Positive': '✓',
-}
+# Inference Trigger
+if st.button("Analyze Sentiment", type="primary"):
+    if user_input.strip():
 
+        # 1. Clean text and extract TF-IDF features
+        cleaned_text = clean_review(user_input)
+        X_tfidf = vectorizer.transform([cleaned_text])
 
-class SentimentApp(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title('Product Review Sentiment Analyzer')
-        self.configure(bg=COLORS['bg'])
-        self.resizable(False, False)
+        # 2. Extract VADER features from the original (uncleaned) text,
+        #    preserving punctuation and casing that VADER relies on
+        vader_feats = np.array(get_vader_features(user_input)).reshape(1, -1)
 
-        # Center window
-        w, h = 560, 500
-        self.geometry(f'{w}x{h}+{(self.winfo_screenwidth()-w)//2}+{(self.winfo_screenheight()-h)//2}')
+        # 3. Combine into the same feature matrix shape used during training
+        review_vec = hstack([X_tfidf, csr_matrix(vader_feats)])
 
-        # Load model
-        self.model, self.vectorizer, self.classes = load_model()
-        self.stp_words = set(stopwords.words('english'))
+        # 4. Extract prediction and max probability (confidence)
+        prediction = model.predict(review_vec)[0]
+        confidence = model.predict_proba(review_vec).max()
+        sentiment = classes[prediction]
 
-        self._build_ui()
+        # 5. Dynamic UI rendering based on the result
+        st.subheader("Result:")
+        if sentiment == 'Positive':
+            st.success(f"**{sentiment.upper()}** (Confidence: {confidence:.1%})")
+        elif sentiment == 'Negative':
+            st.error(f"**{sentiment.upper()}** (Confidence: {confidence:.1%})")
+        else:
+            st.warning(f"**{sentiment.upper()}** (Confidence: {confidence:.1%})")
 
-    def _build_ui(self):
-        # Fonts
-        title_font   = tkfont.Font(family='Courier', size=13, weight='bold')
-        label_font   = tkfont.Font(family='Courier', size=9)
-        input_font   = tkfont.Font(family='Courier', size=11)
-        result_font  = tkfont.Font(family='Courier', size=22, weight='bold')
-        conf_font    = tkfont.Font(family='Courier', size=10)
-        btn_font     = tkfont.Font(family='Courier', size=10, weight='bold')
-
-        pad = dict(padx=32)
-
-        # Title
-        tk.Label(self, text='PRODUCT REVIEW SENTIMENT ANALYZER', bg=COLORS['bg'],
-                 fg=COLORS['accent'], font=title_font).pack(pady=(28, 2), **pad, anchor='w')
-
-        tk.Frame(self, bg=COLORS['accent'], height=1).pack(fill='x', **pad)
-
-        # Input label
-        tk.Label(self, text='ENTER REVIEW HERE: ', bg=COLORS['bg'],
-                 fg=COLORS['muted'], font=label_font).pack(**pad, anchor='w')
-
-        # Text area frame
-        text_frame = tk.Frame(self, bg=COLORS['border'], bd=0)
-        text_frame.pack(fill='x', **pad, pady=(4, 0))
-
-        self.text_input = tk.Text(
-            text_frame, height=6, font=input_font,
-            bg=COLORS['surface'], fg=COLORS['text'],
-            insertbackground=COLORS['accent'],
-            relief='flat', bd=8,
-            wrap='word', spacing1=2,
-        )
-        self.text_input.pack(fill='x')
-        self.text_input.bind('<Return>', self._on_enter)
-
-        # Character hint
-        self.hint = tk.Label(self, text='press Enter or click Analyze',
-                             bg=COLORS['bg'], fg=COLORS['muted'], font=label_font)
-        self.hint.pack(**pad, anchor='e', pady=(3, 0))
-
-        # Analyze button
-        self.btn = tk.Button(
-            self, text='ANALYZE →', font=btn_font,
-            bg=COLORS['accent'], fg=COLORS['bg'],
-            activebackground='#d4b03a', activeforeground=COLORS['bg'],
-            relief='flat', bd=0, padx=20, pady=8, cursor='hand2',
-            command=self.analyze,
-        )
-        self.btn.pack(**pad, anchor='w', pady=(14, 0))
-
-        # Divider
-        tk.Frame(self, bg=COLORS['border'], height=1).pack(fill='x', **pad, pady=(20, 0))
-
-        # Result area
-        result_frame = tk.Frame(self, bg=COLORS['bg'])
-        result_frame.pack(fill='x', **pad, pady=(16, 0))
-
-        self.icon_label = tk.Label(result_frame, text='—', bg=COLORS['bg'],
-                                   fg=COLORS['muted'], font=tkfont.Font(family='Courier', size=28, weight='bold'))
-        self.icon_label.pack(side='left')
-
-        right = tk.Frame(result_frame, bg=COLORS['bg'])
-        right.pack(side='left', padx=(14, 0))
-
-        self.result_label = tk.Label(right, text='awaiting input', bg=COLORS['bg'],
-                                     fg=COLORS['muted'], font=result_font)
-        self.result_label.pack(anchor='w')
-
-        self.conf_label = tk.Label(right, text='', bg=COLORS['bg'],
-                                   fg=COLORS['muted'], font=conf_font)
-        self.conf_label.pack(anchor='w')
-
-    # ── Logic ────────────────────────────────────────────────────────────────
-
-    def _on_enter(self, event):
-        # Shift+Enter = newline, plain Enter = analyze
-        if not event.state & 0x1:
-            self.analyze()
-            return 'break'
-
-    def analyze(self):
-        review = self.text_input.get('1.0', 'end').strip()
-        if not review:
-            self.result_label.config(text='enter a review', fg=COLORS['muted'])
-            self.conf_label.config(text='')
-            self.icon_label.config(text='—', fg=COLORS['muted'])
-            return
-
-        cleaned    = clean_review(review, self.stp_words)
-        review_vec = self.vectorizer.transform([cleaned]).toarray()
-
-        prediction = self.model.predict(review_vec)[0]
-        confidence = self.model.predict_proba(review_vec).max()
-        sentiment  = self.classes[prediction + 1]   # +1 because classes are -1,0,1
-
-        color = SENTIMENT_COLORS[sentiment]
-        icon  = SENTIMENT_ICONS[sentiment]
-
-        self.result_label.config(text=sentiment.upper(), fg=color)
-        self.conf_label.config(text=f'confidence  {confidence:.1%}', fg=COLORS['muted'])
-        self.icon_label.config(text=icon, fg=color)
-
-
-if __name__ == '__main__':
-    app = SentimentApp()
-    app.mainloop()
+    else:
+        st.warning("Please enter some text to analyze.")
