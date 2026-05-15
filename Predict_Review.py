@@ -1,33 +1,27 @@
 import streamlit as st
 import joblib
-import re
 import numpy as np
-from nltk.corpus import stopwords
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
-import nltk
 from scipy.sparse import hstack, csr_matrix
+import re
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+from nltk.corpus import stopwords
+import nltk
+
+# Download NLTK data (first run only)
 nltk.download('stopwords', quiet=True)
 nltk.download('vader_lexicon', quiet=True)
 
-# @st.cache_resource keeps the model in RAM so the web page doesn't reload it on every button click
+st.set_page_config(page_title="Sentiment Analyzer", page_icon="📊", layout="centered")
+
+# Load model
 @st.cache_resource
-def load_model_data():
-    return joblib.load('sentiment_model.joblib')
+def load_model():
+    model_data = joblib.load('sentiment_model.joblib')
+    return model_data['model'], model_data['vectorizer'], model_data['classes']
 
-# Safely attempt to load the packaged model
-try:
-    model_data = load_model_data()
-    model = model_data['model']
-    vectorizer = model_data['vectorizer']
-    classes = model_data['classes']
-except FileNotFoundError:
-    st.error("Model file not found. Please run main.py first.")
-    st.stop()
-
-# --- NLP SETUP ---
-# Must exactly match the logic used during the model's training phase
-stp_words = set(stopwords.words('english'))
+model, vectorizer, classes = load_model()
 sia = SentimentIntensityAnalyzer()
+stp_words = set(stopwords.words('english'))
 
 def clean_review(review):
     review = str(review).lower()
@@ -40,43 +34,43 @@ def get_vader_features(text):
     scores = sia.polarity_scores(str(text))
     return [scores['neg'], scores['neu'], scores['pos'], scores['compound']]
 
-# --- STREAMLIT UI LAYOUT ---
-st.set_page_config(page_title="Sentiment Analyzer", page_icon="🧠")
+st.title("📊 Sentiment Analysis")
+st.markdown("**TF-IDF + VADER + Logistic Regression**")
 
-st.title("🧠 Review Sentiment Analyzer")
-st.markdown("Enter a product or service review below to analyze its sentiment.")
+text = st.text_area("Enter your review or text:", height=200, placeholder="Type here...")
 
-# User Input Widget
-user_input = st.text_area("Review Text", height=150, placeholder="Type your review here...")
-
-# Inference Trigger
-if st.button("Analyze Sentiment", type="primary"):
-    if user_input.strip():
-
-        # 1. Clean text and extract TF-IDF features
-        cleaned_text = clean_review(user_input)
-        X_tfidf = vectorizer.transform([cleaned_text])
-
-        # 2. Extract VADER features from the original (uncleaned) text,
-        #    preserving punctuation and casing that VADER relies on
-        vader_feats = np.array(get_vader_features(user_input)).reshape(1, -1)
-
-        # 3. Combine into the same feature matrix shape used during training
-        review_vec = hstack([X_tfidf, csr_matrix(vader_feats)])
-
-        # 4. Extract prediction and max probability (confidence)
-        prediction = model.predict(review_vec)[0]
-        confidence = model.predict_proba(review_vec).max()
-        sentiment = classes[prediction]
-
-        # 5. Dynamic UI rendering based on the result
-        st.subheader("Result:")
-        if sentiment == 'Positive':
-            st.success(f"**{sentiment.upper()}** (Confidence: {confidence:.1%})")
-        elif sentiment == 'Negative':
-            st.error(f"**{sentiment.upper()}** (Confidence: {confidence:.1%})")
-        else:
-            st.warning(f"**{sentiment.upper()}** (Confidence: {confidence:.1%})")
+if st.button("Analyze Sentiment", type="primary", use_container_width=True):
+    if text.strip():
+        with st.spinner("Analyzing..."):
+            # Preprocess
+            clean_text = clean_review(text)
+            vader_feats = np.array(get_vader_features(text)).reshape(1, -1)
+            
+            # Vectorize
+            tfidf_vec = vectorizer.transform([clean_text])
+            X_input = hstack([tfidf_vec, csr_matrix(vader_feats)])
+            
+            # Predict
+            pred = model.predict(X_input)[0]
+            probs = model.predict_proba(X_input)[0]
+            
+            sentiment = classes[pred]
+            
+            # Display
+            col1, col2 = st.columns([1, 2])
+            
+            with col1:
+                if sentiment == "Positive":
+                    st.success("Positive 😊")
+                elif sentiment == "Negative":
+                    st.error("Negative 😞")
+                else:
+                    st.warning("Neutral 😐")
+            
+            with col2:
+                st.subheader("Confidence")
+                for label, prob in zip(["Negative", "Neutral", "Positive"], probs):
+                    st.progress(float(prob), text=f"{label}: {prob:.1%}")
 
     else:
-        st.warning("Please enter some text to analyze.")
+        st.warning("Please enter some text!")
